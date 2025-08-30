@@ -1,11 +1,21 @@
 import { type Context, Schema, h } from 'koishi'
-import { createHash } from 'node:crypto'
-import { randomInt } from 'node:crypto'
+import { createHash, randomInt } from 'node:crypto'
 
 export const name = 'jrrp'
 
-export const Config: Schema<any> = Schema.object({})
-export const inject = ['database']
+export const inject = ['database', 'http']
+
+export interface Config {
+  useHitokoto: boolean
+}
+
+export const Config: Schema<Config> = Schema.object({
+  useHitokoto: Schema.boolean()
+    .default(true)
+    .description(
+      '是否使用一言（hitokoto.cn），开启后会在投稿与一言中随机展示其一'
+    )
+})
 
 interface JrrpSentence {
   id: number
@@ -17,6 +27,15 @@ interface JrrpSentence {
 }
 
 const table = 'jrrp_las'
+
+interface HitokotoResp {
+  id: number
+  uuid: string
+  hitokoto: string
+  type: string
+  from: string
+  from_who?: string | null
+}
 
 declare module 'koishi' {
   interface Tables {
@@ -49,12 +68,21 @@ function normalizeSentence(str: string) {
     .trim()
 }
 
+function shuffleArray<T>(arr: T[]) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = randomInt(0, i + 1)
+    const tmp = arr[i]
+    arr[i] = arr[j]
+    arr[j] = tmp
+  }
+}
+
 function todayYYMMDD() {
   const date = new Date()
   return `${date.getFullYear().toString().slice(2)}${(date.getMonth() + 1).toString().padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}`
 }
 
-export function apply(ctx: Context) {
+export function apply(ctx: Context, config: Config) {
   ctx.model.extend(
     table,
     {
@@ -80,11 +108,52 @@ export function apply(ctx: Context) {
     let sender = '?'
     let quote = '快点使用 今日人品 投稿！！！'
 
-    if (all.length > 0) {
-      const index = randomInt(0, all.length)
-      const picked = all[index]
-      sender = picked.sender || '?'
-      quote = `「${picked.sentence}」\n    ——${picked.source}`
+    type Candidate = { kind: 'db'; index: number } | { kind: 'hitokoto' }
+    const candidates: Candidate[] = all.map((_, i) => ({
+      kind: 'db',
+      index: i
+    }))
+    if (config.useHitokoto) candidates.push({ kind: 'hitokoto' })
+    shuffleArray(candidates)
+
+    const tryPickHitokoto = async () => {
+      try {
+        const data = (await ctx.http.get('https://v1.hitokoto.cn', {
+          params: { encode: 'json' },
+          timeout: 5000
+        })) as unknown as HitokotoResp
+
+        const author = (data.from_who || '').trim()
+        const from = (data.from || '').trim()
+        const source =
+          author && from
+            ? `${author}《${from}》`
+            : from
+              ? `《${from}》`
+              : author || '一言'
+
+        quote = `「${data.hitokoto}」\n    ——${source}`
+        sender = 'hitokoto.cn'
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    let _picked = false
+    for (const c of candidates) {
+      if (c.kind === 'db') {
+        const pickedDb = all[c.index]
+        if (pickedDb) {
+          sender = pickedDb.sender || '?'
+          quote = `「${pickedDb.sentence}」\n    ——${pickedDb.source}`
+          _picked = true
+          break
+        }
+      } else if (await tryPickHitokoto()) {
+        _picked = true
+        break
+      }
     }
 
     const reply = [
@@ -101,9 +170,12 @@ export function apply(ctx: Context) {
     await session.send(reply)
   })
 
-  base.subcommand('投稿', '投稿语录').action(async ({ session }) => {
-    const content = (session.content || '').replace(/\r\n/g, '\n')
-    if (!(content.includes('!文本\n') && content.includes('!出处\n'))) {
+  ctx.command('jrrp.投稿').action(async ({ session }) => {
+    const raw = session.content || ''
+    const content = raw.replace(/\r\n/g, '\n')
+
+    const m = content.match(/!文本\s*([\s\S]*?)\s*!出处\s*([\s\S]+)$/)
+    if (!m) {
       await session.send(
         '投稿格式: \n今日人品 投稿\n!文本\n在此处填写文本 可换行\n!出处\n在此处填写出处 作者《出处》'
       )
@@ -111,10 +183,8 @@ export function apply(ctx: Context) {
     }
 
     try {
-      const sentence = trimBr(
-        content.split('\n!出处\n')[0].split('!文本\n')[1] || ''
-      )
-      const source = trimBr(content.split('!出处\n')[1] || '')
+      const sentence = trimBr(m[1] || '')
+      const source = trimBr(m[2] || '')
       const fingerprint = normalizeSentence(sentence)
 
       const dup = await ctx.database.get(table, { fingerprint }, { limit: 1 })
@@ -137,30 +207,24 @@ export function apply(ctx: Context) {
     }
   })
 
-  base
-    .subcommand('撤回投稿', '撤回自己的上一条投稿')
-    .action(async ({ session }) => {
-      const records = await ctx.database.get(
-        table,
-        { sender: session.userId },
-        { limit: 1, sort: { createdAt: 'desc' } }
-      )
-      const last = records[0]
-      if (!last) {
-        await session.send('撤回失败:找不到可以撤回的消息')
-        return
-      }
-      await ctx.database.remove(table, { id: last.id })
-      await session.send(
-        `撤回成功:\n「${last.sentence}」\n    ——${last.source}`
-      )
-    })
+  ctx.command('jrrp.撤回投稿').action(async ({ session }) => {
+    const records = await ctx.database.get(
+      table,
+      { sender: session.userId },
+      { limit: 1, sort: { createdAt: 'desc' } }
+    )
+    const last = records[0]
+    if (!last) {
+      await session.send('撤回失败:找不到可以撤回的消息')
+      return
+    }
+    await ctx.database.remove(table, { id: last.id })
+    await session.send(`撤回成功:\n「${last.sentence}」\n    ——${last.source}`)
+  })
 
-  base
-    .subcommand('帮助', '显示此插件的帮助信息')
-    .action(async ({ session }) => {
-      await session.send(
-        '今日人品\n今日人品 -> 今日幸运指数+语录(娱乐向)\n——语录每人每日至多随机三句(但是有新投稿就会刷新 特性!)\n今日人品 投稿 -> 查看如何投稿语录\n今日人品 撤回投稿 -> 撤回自己的上一条投稿\n今日人品 帮助 -> 显示此信息'
-      )
-    })
+  ctx.command('jrrp.帮助').action(async ({ session }) => {
+    await session.send(
+      '今日人品\n今日人品 -> 今日幸运指数+语录(娱乐向)\n——可在配置中启用「一言」：将与投稿语录二选一随机展示\n今日人品 投稿 -> 查看如何投稿语录\n今日人品 撤回投稿 -> 撤回自己的上一条投稿\n今日人品 帮助 -> 显示此信息'
+    )
+  })
 }
