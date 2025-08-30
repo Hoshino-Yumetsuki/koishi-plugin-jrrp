@@ -1,6 +1,6 @@
 {
-  "name": "koishi-plugin-jrrp",
-  "description": "LAS 今日人品复刻",
+  "name": "@q78kg/koishi-plugin-jrrp",
+  "description": "今日人品（LAS 复刻版）",
   "version": "1.0.0",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
@@ -47,10 +47,12 @@
   },
   "koishi": {
     "description": {
-      "zh": "LAS 今日人品复刻"
+      "zh": "今日人品（LAS 复刻版）"
+    },
+    "service": {
+      "required": [
+        "database"
+      ]
     }
-  },
-  "dependencies": {
-    "pyodide": "^0.28.2"
   }
 }
