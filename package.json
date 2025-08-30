@@ -1,0 +1,56 @@
+{
+  "name": "koishi-plugin-jrrp",
+  "description": "LAS 今日人品复刻",
+  "version": "1.0.0",
+  "main": "lib/index.cjs",
+  "module": "lib/index.mjs",
+  "types": "lib/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "require": "./lib/index.cjs",
+      "import": "./lib/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "rolldown -c rolldown.config.js",
+    "publish": "yarn npm publish",
+    "lint": "biome check && biome lint",
+    "lint-fix": "biome format --write && biome lint --write"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/Hoshino-Yumetsuki/koishi-plugin-jrrp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hoshino-Yumetsuki/koishi-plugin-jrrp"
+  },
+  "keywords": [
+    "koishi",
+    "plugin",
+    "jrrp",
+    "今日人品"
+  ],
+  "peerDependencies": {
+    "koishi": "^4.17.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.2",
+    "@types/node": "^24.3.0",
+    "koishi": "^4.18.9",
+    "rolldown": "1.0.0-beta.34",
+    "rolldown-plugin-dts": "^0.15.10"
+  },
+  "koishi": {
+    "description": {
+      "zh": "LAS 今日人品复刻"
+    }
+  },
+  "dependencies": {
+    "pyodide": "^0.28.2"
+  }
+}
