@@ -48,12 +48,6 @@
   "koishi": {
     "description": {
       "zh": "今日人品（LAS 复刻版）"
-    },
-    "service": {
-      "required": [
-        "database",
-        "http"
-      ]
     }
   }
 }
